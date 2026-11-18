@@ -1,0 +1,91 @@
+syntax = "proto3";
+option csharp_namespace = "MoonFarm";
+import "common.proto";
+
+// 统一错误码消息. 业务 handler 直接 return 错误码时由框架下发.
+message S2CErrorCode {
+  int32 code = 1;
+}
+
+message C2SLogin {
+  string openid = 1;
+  string name = 2;
+}
+
+message S2CLogin {
+  bool ok = 1;
+  int64 uid = 2;
+  int64 time = 3;
+  int64 timezone = 4;
+  string name = 5;
+}
+
+// state: 0=未解锁 1=空地 2=生长中 3=可收获
+message PlotData {
+  int32 index = 1;
+  int32 state = 2;
+  int32 crop_id = 3;
+  int64 planted_at = 4;   // ms
+  int64 ready_at = 5;     // ms
+  bool watered = 6;
+  bool fertilized = 7;
+  int32 stage = 8;        // 0..2, 2=成熟
+  float progress = 9;     // 0..1
+}
+
+message PlayerData {
+  int64 uid = 1;
+  string name = 2;
+  int32 level = 3;
+  int64 exp = 4;
+  int64 coin = 5;
+  repeated PlotData plots = 6;
+  repeated ItemData items = 7;
+  int64 server_time = 8;
+}
+
+message C2SEnterFarm {}
+message S2CEnterFarm { PlayerData data = 1; }
+
+message C2SPlant {
+  int32 index = 1;
+  int32 crop_id = 2;
+}
+
+message C2SWater { int32 index = 1; }
+message C2SFertilize { int32 index = 1; }
+message C2SHarvest { int32 index = 1; }
+
+message C2SBuy {
+  int32 item_id = 1;
+  int64 count = 2;
+}
+
+message C2SSell {
+  int32 item_id = 1;
+  int64 count = 2;
+}
+
+message C2SPing { int64 time = 1; }
+
+// 每个 C2S 操作处理成功后回一个 S2COk, cmd 为对应 C2S 的消息码.
+// 状态变化通过 S2CPlotUpdate / S2CItemUpdate / S2CPlayerUpdate 推送.
+message S2COk { int32 cmd = 1; }
+
+message S2CPlotUpdate { PlotData plot = 1; }
+
+message S2CHarvest {
+  PlotData plot = 1;
+  repeated ItemData items = 2; // 本次收获获得的果实
+  int32 exp = 3;               // 本次收获获得的经验
+}
+
+message S2CItemUpdate { repeated ItemData items = 1; }
+
+message S2CPlayerUpdate {
+  int32 level = 1;
+  int64 exp = 2;
+  int64 coin = 3;
+}
+
+message S2CPong { int64 time = 1; }

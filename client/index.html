@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>MoonFarm · 月亮农场</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+    <div id="stage">
+        <canvas id="farm" width="960" height="600"></canvas>
+
+        <div id="hud" class="hidden">
+            <div class="hud-left">
+                <div class="avatar">🌾</div>
+                <div class="hud-info">
+                    <div class="hud-name" id="hud-name">农场主</div>
+                    <div class="expbar"><span id="hud-expbar"></span></div>
+                    <div class="hud-sub" id="hud-level">Lv.1 · 0/100</div>
+                </div>
+            </div>
+            <div class="hud-right">
+                <div class="pill coin">💰 <span id="hud-coin">0</span></div>
+                <div class="pill conn" id="hud-conn">●</div>
+            </div>
+        </div>
+
+        <div id="toolbar" class="hidden">
+            <button data-act="plant" class="primary">🌱 播种</button>
+            <button data-act="water">💧 浇水</button>
+            <button data-act="fert">🧪 施肥</button>
+            <button data-act="harvest">🧺 收获</button>
+            <span class="sep"></span>
+            <button id="btn-bag">🎒 背包</button>
+            <button id="btn-shop">🏪 商店</button>
+        </div>
+
+        <div id="panel" class="hidden">
+            <div class="panel-head">
+                <span id="panel-title"></span>
+                <button id="panel-close" title="关闭">✕</button>
+            </div>
+            <div id="panel-body"></div>
+        </div>
+
+        <div id="toasts"></div>
+    </div>
+
+    <div id="login">
+        <div class="login-card">
+            <h1>🌾 MoonFarm</h1>
+            <p class="hint">月亮农场 · 种下第一颗种子</p>
+
+            <label for="login-openid">openid（相同 openid 恢复同一存档）</label>
+            <input id="login-openid" value="farmer_demo" maxlength="64" autocomplete="off">
+
+            <label for="login-name">昵称</label>
+            <input id="login-name" value="小农夫" maxlength="16" autocomplete="off">
+
+            <details>
+                <summary>服务器地址</summary>
+                <input id="login-ws" value="ws://127.0.0.1:9002/" autocomplete="off">
+            </details>
+
+            <button id="login-btn">进入农场</button>
+            <div id="login-status"></div>
+        </div>
+    </div>
+</div>
+
+<script src="js/vendor/long.min.js"></script>
+<script src="js/vendor/protobuf.min.js"></script>
+<script src="js/proto-inline.js"></script>
+<script src="js/protocol.js"></script>
+<script src="js/net.js"></script>
+<script src="js/cfg.js"></script>
+<script src="js/game.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

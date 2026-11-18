@@ -1,0 +1,7 @@
+syntax = "proto3";
+option csharp_namespace = "MoonFarm";
+
+message ItemData {
+  int32 id = 1;
+  int64 count = 2;
+}

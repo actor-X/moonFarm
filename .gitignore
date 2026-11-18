@@ -1,0 +1,10 @@
+server/log/
+server/console.log
+server/serverconf.local.lua
+*.log
+node_modules/
+*.exe
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
