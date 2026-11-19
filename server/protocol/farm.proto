@@ -2,90 +2,187 @@ syntax = "proto3";
 option csharp_namespace = "MoonFarm";
 import "common.proto";
 
+// ---------------------------------------------------------------------------
+// 约定:
+//   * C2S* = 客户端 -> 服务端, S2C* = 服务端 -> 客户端
+//   * 帧格式 (由 protocol_pb.lua 负责, 不在 proto 里体现):
+//       C2S: [cmd:2 小端][protobuf 消息体]
+//       S2C: [uid 序列化][cmd:2 小端][protobuf 消息体]
+//   * 字段号一经发布不可修改或复用, 只能新增字段 (proto3 未知字段会被跳过)
+//   * 空消息 (如 C2SEnterFarm) 只有 2 字节 cmd, 没有 body
+//   * 所有时间戳单位均为毫秒 (moon.now()), 除非单独注明
+// ---------------------------------------------------------------------------
+
 // 统一错误码消息. 业务 handler 直接 return 错误码时由框架下发.
+// 客户端通常在收到后取消当前操作等待.
 message S2CErrorCode {
+  // 业务错误码, 见 common/ErrorCode.lua; 取值 1~3 为通用错误, 101+ 为农场业务错误
   int32 code = 1;
 }
 
+// 登录请求. 未登录连接发送的第一个包, gate 会把它转给 auth 服务.
 message C2SLogin {
+  // 平台账号唯一标识, 不能为空; 服务端由它查/建 uid (farm:openid)
   string openid = 1;
+  // 昵称, 可为空; 每次登录都会覆盖存档中的昵称 (可留空则沿用 openid)
   string name = 2;
 }
 
+// 登录响应.
 message S2CLogin {
+  // 是否登录成功. 失败时连接会被关闭, 正常流程只会收到 true
   bool ok = 1;
+  // 服务端分配的玩家 id (自增, 见 farm:uid_seq)
   int64 uid = 2;
+  // 服务器当前时间, 毫秒级 Unix 时间戳
   int64 time = 3;
+  // 服务器时区偏移, 单位: 小时 (如 8 表示 UTC+8)
   int64 timezone = 4;
+  // 最终生效的昵称 (本次请求优先, 否则用存档里的)
   string name = 5;
 }
 
-// state: 0=未解锁 1=空地 2=生长中 3=可收获
+// 单块地的完整状态. 用于 S2CEnterFarm / S2CPlotUpdate / S2CHarvest.
+// state: 0=未解锁 1=空地 2=生长中 3=可收获 (3 由服务端按 ready_at 运行时计算, 不存档)
 message PlotData {
+  // 地块序号, 1..12 (GameCfg.constants.plot_count), 1 基
   int32 index = 1;
+  // 地块状态. 0=锁定 1=空地 2=生长中 3=成熟可收获
   int32 state = 2;
+  // 作物 id (GameCfg.crops 的 key, 1..4); 空地/锁定时为 0
   int32 crop_id = 3;
-  int64 planted_at = 4;   // ms
-  int64 ready_at = 5;     // ms
+  // 播种时间, 毫秒时间戳; 非生长中为 0
+  int64 planted_at = 4;
+  // 预计成熟时间, 毫秒时间戳; 浇水/施肥会提前; 非生长中为 0
+  int64 ready_at = 5;
+  // 本轮是否已浇水 (每轮一次, 缩短 10% 总生长时间); 播种/收获时重置
   bool watered = 6;
+  // 本轮是否已施肥 (每轮一次, 消耗化肥并缩短 30%); 播种/收获时重置
   bool fertilized = 7;
-  int32 stage = 8;        // 0..2, 2=成熟
-  float progress = 9;     // 0..1
+  // 客户端生长阶段 0..2, 2=视觉成熟; 由 progress 计算, 成熟时恒为 2
+  int32 stage = 8;
+  // 生长进度 0..1 (0=刚播种, 1=成熟); 成熟时恒为 1
+  float progress = 9;
 }
 
+// 玩家完整数据.
 message PlayerData {
+  // 玩家 id
   int64 uid = 1;
+  // 昵称
   string name = 2;
+  // 等级, 从 1 开始
   int32 level = 3;
+  // 当前等级内的经验; 达到 NextExp(level) 时升级并扣减
   int64 exp = 4;
+  // 金币, 非负
   int64 coin = 5;
+  // 全部地块, 长度固定为 plot_count (12), 下标即 index-1
   repeated PlotData plots = 6;
+  // 背包中数量 > 0 的道具, 按 id 升序
   repeated ItemData items = 7;
+  // 服务器当前时间, 毫秒时间戳, 供客户端校准本地时间
   int64 server_time = 8;
 }
 
+// 请求完整的玩家数据 (进入农场). 无字段.
 message C2SEnterFarm {}
-message S2CEnterFarm { PlayerData data = 1; }
 
+// 完整的玩家数据快照.
+message S2CEnterFarm {
+  // 玩家完整数据
+  PlayerData data = 1;
+}
+
+// 播种.
 message C2SPlant {
+  // 目标地块序号 1..12; 必须是空地 (state=1)
   int32 index = 1;
+  // 作物 id, 必须是 GameCfg.crops 的 key; 消耗对应种子 1 个
   int32 crop_id = 2;
 }
 
-message C2SWater { int32 index = 1; }
-message C2SFertilize { int32 index = 1; }
-message C2SHarvest { int32 index = 1; }
+// 浇水. 每轮只能浇一次, 缩短 10% 总生长时间.
+message C2SWater {
+  // 地块序号 1..12; 必须处于生长中 (state=2) 且本轮未浇水
+  int32 index = 1;
+}
 
+// 施肥. 每轮只能施一次, 消耗化肥 (2001) 并缩短 30% 总生长时间.
+message C2SFertilize {
+  // 地块序号 1..12; 必须处于生长中 (state=2) 且本轮未施肥
+  int32 index = 1;
+}
+
+// 收获.
+message C2SHarvest {
+  // 地块序号 1..12; 必须已成熟 (state=3)
+  int32 index = 1;
+}
+
+// 商店购买.
 message C2SBuy {
+  // 道具 id; 必须存在且 buy_price > 0
   int32 item_id = 1;
+  // 购买数量 1..999; 0 或越界返回 ParamInvalid(2); 总价 = buy_price * count
   int64 count = 2;
 }
 
+// 商店出售.
 message C2SSell {
+  // 道具 id; 必须存在且 sell_price > 0
   int32 item_id = 1;
+  // 出售数量 1..999; 0 或越界返回 ParamInvalid(2); 总收入 = sell_price * count
   int64 count = 2;
 }
 
-message C2SPing { int64 time = 1; }
+// 心跳请求.
+message C2SPing {
+  // 客户端本地时间, 毫秒; 服务端原样回显, 客户端用它计算 RTT
+  int64 time = 1;
+}
 
 // 每个 C2S 操作处理成功后回一个 S2COk, cmd 为对应 C2S 的消息码.
 // 状态变化通过 S2CPlotUpdate / S2CItemUpdate / S2CPlayerUpdate 推送.
-message S2COk { int32 cmd = 1; }
-
-message S2CPlotUpdate { PlotData plot = 1; }
-
-message S2CHarvest {
-  PlotData plot = 1;
-  repeated ItemData items = 2; // 本次收获获得的果实
-  int32 exp = 3;               // 本次收获获得的经验
+message S2COk {
+  // 对应 C2S 消息的消息码 (common/CmdCode.lua)
+  int32 cmd = 1;
 }
 
-message S2CItemUpdate { repeated ItemData items = 1; }
+// 单块地状态变化推送.
+message S2CPlotUpdate {
+  // 变化后的地块完整状态
+  PlotData plot = 1;
+}
 
+// 收获结果.
+message S2CHarvest {
+  // 收获后的地块状态 (已重置为空地)
+  PlotData plot = 1;
+  // 本次收获获得的果实及数量 (yield_min..yield_max 随机)
+  repeated ItemData items = 2;
+  // 本次收获获得的经验
+  int32 exp = 3;
+}
+
+// 背包条目变化推送.
+message S2CItemUpdate {
+  // 发生变化的道具条目; 每项的 count 是变更后的最新总数 (不是增量)
+  repeated ItemData items = 1;
+}
+
+// 玩家数值变化推送.
 message S2CPlayerUpdate {
+  // 变更后的最新等级
   int32 level = 1;
+  // 变更后的当前等级内经验
   int64 exp = 2;
+  // 变更后的金币
   int64 coin = 3;
 }
 
-message S2CPong { int64 time = 1; }
+// 心跳响应.
+message S2CPong {
+  // 回显 C2SPing.time, 客户端用 (now - time) 估算 RTT
+  int64 time = 1;
+}

@@ -142,21 +142,65 @@
         return ERROR_TEXT[code] || ('操作失败 (' + code + ')');
     }
 
-    async function action(cmd, req, okText) {
-        if (!state.net || !state.connected) { toast('连接已断开', 'err'); return null; }
-        if (state.busy) return null;
+    // ---------------- 操作队列 ----------------
+    // 连点时排队依次执行, 不再丢弃后续点击; 同一时刻只有一个请求在飞.
+    // 注意: 服务端暂未回显 seq, 超时后的迟到确认包无法与下一次同类型请求区分,
+    //       因此超时后先等一小段再执行下一个操作, 尽量让迟到包先被丢弃.
+    const ACTION_TIMEOUT_COOLDOWN = 300;
+    const MAX_QUEUED_ACTIONS = 8;
+    const actionQueue = [];
+    let pumping = false;
+
+    function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+    async function runAction(job) {
         state.busy = true;
         try {
-            const r = await state.net.call(cmd, req, 'S2COk');
+            const r = await state.net.call(job.cmd, job.req, 'S2COk');
             if (!r.ok) { toast(errorText(r), 'err'); return null; }
-            if (okText) toast(okText, 'good');
+            if (job.okText) toast(job.okText, 'good');
             return r;
         } catch (e) {
+            if (e && e.message === '请求超时') await sleep(ACTION_TIMEOUT_COOLDOWN);
             toast(e.message || '网络错误', 'err');
             return null;
         } finally {
             state.busy = false;
         }
+    }
+
+    async function pumpActions() {
+        if (pumping) return;
+        pumping = true;
+        try {
+            while (actionQueue.length) {
+                if (!state.net || !state.connected) {
+                    const rest = actionQueue.splice(0);
+                    for (const job of rest) job.resolve(null);
+                    break;
+                }
+                const job = actionQueue.shift();
+                job.resolve(await runAction(job));
+            }
+        } finally {
+            pumping = false;
+        }
+    }
+
+    // 入队并返回 Promise; 队列满时立即失败, 避免无限堆积
+    function action(cmd, req, okText) {
+        if (!state.net || !state.connected) {
+            toast('连接已断开', 'err');
+            return Promise.resolve(null);
+        }
+        if (actionQueue.length >= MAX_QUEUED_ACTIONS) {
+            toast('操作太频繁，请稍候', 'err');
+            return Promise.resolve(null);
+        }
+        return new Promise((resolve) => {
+            actionQueue.push({ cmd, req, okText, resolve });
+            pumpActions();
+        });
     }
 
     function selectedPlot() { return state.plots[state.selected]; }

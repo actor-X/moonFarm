@@ -1,7 +1,13 @@
 syntax = "proto3";
 option csharp_namespace = "MoonFarm";
 
+// 背包条目: 道具 id + 数量.
+// 同时用于 PlayerData.items / S2CItemUpdate.items / S2CHarvest.items.
+// 注意: 字段号一经发布不可修改, 只能新增.
 message ItemData {
+  // 道具 id. 1001~1004=种子, 1101~1104=果实, 2001=化肥 (见 common/config/items.lua)
   int32 id = 1;
+  // 数量. PlayerData.items 只包含 > 0 的条目;
+  // S2CItemUpdate 会下发数量变为 0 的条目, 客户端据此移除显示
   int64 count = 2;
 }
