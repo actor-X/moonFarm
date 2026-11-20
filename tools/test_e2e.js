@@ -1,4 +1,4 @@
-// 真实服务器端到端测试: 登录 -> 进农场 -> 播种 -> 浇水/施肥 -> 收获 -> 卖果实 -> 买化肥
+﻿// 真实服务器端到端测试: 登录 -> 进农场 -> 播种 -> 浇水/施肥 -> 收获 -> 卖果实 -> 买化肥
 // 前提: server 已启动 (ws://127.0.0.1:9002/)
 // 运行: node tools/test_e2e.js [host] [port]
 'use strict';
@@ -52,9 +52,14 @@ function withTimeout(p, ms, msg) {
     let player = { level: Number(data.level), exp: Number(data.exp), coin: Number(data.coin) };
     const plotUpdates = [];
     const harvestMsgs = [];
+    const harvestAllMsgs = [];
+    const plantAllMsgs = [];
+    let itemUpdateCount = 0;
     net.on('S2CPlotUpdate', m => plotUpdates.push(m.plot));
     net.on('S2CHarvest', m => harvestMsgs.push(m));
-    net.on('S2CItemUpdate', m => (m.items || []).forEach(it => { items[Number(it.id)] = Number(it.count); }));
+    net.on('S2CHarvestAll', m => harvestAllMsgs.push(m));
+    net.on('S2CPlantAll', m => plantAllMsgs.push(m));
+    net.on('S2CItemUpdate', m => { itemUpdateCount++; (m.items || []).forEach(it => { items[Number(it.id)] = Number(it.count); }); });
     net.on('S2CPlayerUpdate', m => {
         player = { level: Number(m.level), exp: Number(m.exp), coin: Number(m.coin) };
     });
@@ -110,6 +115,71 @@ function withTimeout(p, ms, msg) {
     const locked = data.plots.find(p => p.state === 0);
     r = await net.call('C2SPlant', { index: locked.index, crop_id: 3 }, 'S2COk');
     ok(!r.ok && Number(r.data.code) === 102, '未解锁地块播种被拒绝 (102)', r);
+
+    // ================= 一键种植 / 一键收获 =================
+    const latestPlot = (i) => plotUpdates.filter(p => Number(p.index) === Number(i)).pop();
+    const emptyIdx = [];
+    for (let i = 1; i <= 12; i++) {
+        const p = latestPlot(i) || data.plots[i - 1];
+        if (Number(p.state) === 1) emptyIdx.push(i);
+    }
+    ok(emptyIdx.length >= 2, '存在多块空地供批量种植', emptyIdx);
+
+    const seedsBefore = items[1003] || 0;
+    const puBeforePlant = plotUpdates.length;
+    const iuBeforePlant = itemUpdateCount;
+    r = await net.call('C2SPlantAll', { crop_id: 3, indices: emptyIdx }, 'S2COk');
+    ok(r.ok, '一键种植请求成功', r);
+    ok(plantAllMsgs.length === 1, '收到 S2CPlantAll 推送');
+    const pa = plantAllMsgs[0];
+    const expectPlanted = Math.min(emptyIdx.length, seedsBefore);
+    ok(Number(pa.planted) === expectPlanted, '实际种植块数 = min(空地数, 种子数)', { planted: pa.planted, empty: emptyIdx.length, seeds: seedsBefore });
+    ok(pa.plots.length === expectPlanted, 'S2CPlantAll 带回的地块数一致', pa.plots && pa.plots.length);
+    ok(pa.plots.every(p => Number(p.state) === 2 && Number(p.crop_id) === 3), '批量种植后地块进入生长中');
+    ok((items[1003] || 0) === seedsBefore - expectPlanted, '种子按实际种植块数扣减');
+    ok(itemUpdateCount === iuBeforePlant + 1, '批量种植只推 1 条背包更新', itemUpdateCount - iuBeforePlant);
+    ok(plotUpdates.length === puBeforePlant, '批量种植不逐块推 S2CPlotUpdate', plotUpdates.length - puBeforePlant);
+
+    // 没有种子(草莓 1004 初始为 0) -> SeedNotEnough(112)
+    r = await net.call('C2SPlantAll', { crop_id: 4, indices: emptyIdx }, 'S2COk');
+    ok(!r.ok && Number(r.data.code) === 112, '没有种子时批量种植被拒绝 (112)', r);
+
+    // 只传锁定地块 -> NoEmptyPlot(115)
+    const lockedPlots = data.plots.filter(p => p.state === 0).map(p => p.index);
+    r = await net.call('C2SPlantAll', { crop_id: 3, indices: lockedPlots }, 'S2COk');
+    ok(!r.ok && Number(r.data.code) === 115, '没有合法空地时批量种植被拒绝 (115)', r);
+
+    // 空列表 -> ParamInvalid(2)
+    r = await net.call('C2SPlantAll', { crop_id: 3, indices: [] }, 'S2COk');
+    ok(!r.ok && Number(r.data.code) === 2, '空地块列表被拒绝 (2)', r);
+
+    // 等这批作物成熟
+    const batchReady = Math.max(0, Number(pa.plots[0].ready_at) - Date.now()) + 900;
+    console.log('  ... 等待批量作物成熟', Math.round(batchReady / 1000) + 's');
+    await sleep(Math.min(batchReady, 40000));
+
+    const expBeforeBatch = player.exp;
+    const levelBeforeBatch = player.level;
+    const fruitsBefore = items[1103] || 0;
+    const puBeforeHarvest = plotUpdates.length;
+    const iuBeforeHarvest = itemUpdateCount;
+    r = await net.call('C2SHarvestAll', {}, 'S2COk');
+    ok(r.ok, '一键收获请求成功', r);
+    ok(harvestAllMsgs.length === 1, '收到 S2CHarvestAll 推送');
+    const ha = harvestAllMsgs[0];
+    ok(ha.plots.length === expectPlanted, '一键收获带回全部成熟地', ha.plots && ha.plots.length);
+    ok(ha.plots.every(p => Number(p.state) === 1), '一键收获后地块全部恢复空地');
+    ok(ha.items.length === 1 && Number(ha.items[0].id) === 1103, '果实按 id 合并成一条', ha.items);
+    ok(Number(ha.items[0].count) >= expectPlanted * 2, '产量为每块随机产量之和', ha.items[0].count);
+    ok(Number(ha.exp_total) === expectPlanted * 4, '总经验 = 每块经验之和', ha.exp_total);
+    ok((items[1103] || 0) === fruitsBefore + Number(ha.items[0].count), '背包果实与收获量一致');
+    ok(player.exp !== expBeforeBatch || player.level > levelBeforeBatch, '经验/等级已推送');
+    ok(itemUpdateCount === iuBeforeHarvest + 1, '批量收获只推 1 条背包更新', itemUpdateCount - iuBeforeHarvest);
+    ok(plotUpdates.length === puBeforeHarvest, '批量收获不逐块推 S2CPlotUpdate', plotUpdates.length - puBeforeHarvest);
+
+    // 再收一次 -> NothingToHarvest(113)
+    r = await net.call('C2SHarvestAll', {}, 'S2COk');
+    ok(!r.ok && Number(r.data.code) === 113, '无成熟作物时一键收获被拒绝 (113)', r);
 
     console.log(`\n结果: ${pass} passed, ${fail} failed  (uid=${uid})`);
     net.close();

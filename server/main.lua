@@ -8,8 +8,8 @@ if _G["__init__"] then
         path = table.concat({
             "./?.lua",
             "./?/init.lua",
-            "../../lualib/?.lua",
-            "../../service/?.lua",
+            "./lualib/?.lua",
+            "./service/?.lua",
         }, ";")
     }
 end
@@ -47,7 +47,7 @@ local services = {
     {
         unique = true,
         name = "db",
-        file = "../../service/redisd.lua",
+        file = "service/redisd.lua",
         threadid = 1,
         poolsize = 5,
         opts = serverconf.redis,

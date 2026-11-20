@@ -21,6 +21,12 @@ local M = {
     S2CPlayerUpdate = 16,
     S2CPong = 17,
     S2CErrorCode = 18,
+
+    --- 批量操作(一键收获/一键种植). 新增于收获 UI 改造, 旧客户端不受影响.
+    C2SHarvestAll = 19,
+    S2CHarvestAll = 20,
+    C2SPlantAll = 21,
+    S2CPlantAll = 22,
 }
 
 --- 预留: 以后加社交/房间时, 可在这里指定 C2S 消息转发到哪个服务

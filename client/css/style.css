@@ -157,6 +157,193 @@ html, body {
 
 #toolbar .sep { width: 1px; height: 24px; background: rgba(0, 0, 0, 0.12); }
 
+#toolbar button { position: relative; }
+
+#toolbar button:disabled { opacity: 0.55; cursor: progress; }
+
+#harvest-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 99px;
+    background: #e0533f;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    display: grid;
+    place-items: center;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.28);
+}
+
+#toolbar button.harvest-ready { animation: harvestPulse 1.5s ease-in-out infinite; }
+
+@keyframes harvestPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(240, 180, 41, 0); }
+    50% { box-shadow: 0 0 0 5px rgba(240, 180, 41, 0.35); }
+}
+
+/* ---------------- plantbar ---------------- */
+/* 与 toolbar 同一个位置: 打开时工具栏收起, 避免遮住第三行地块 */
+#plantbar {
+    position: absolute;
+    left: 50%;
+    bottom: 14px;
+    transform: translateX(-50%);
+    width: min(92%, 880px);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24);
+    animation: plantin 0.16s ease;
+}
+
+@keyframes plantin {
+    from { transform: translate(-50%, 8px); opacity: 0; }
+    to { transform: translate(-50%, 0); opacity: 1; }
+}
+
+.plantbar-left {
+    flex: 0 0 auto;
+    min-width: 116px;
+    padding-right: 12px;
+    border-right: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.plantbar-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #3d5b34;
+    opacity: 0.85;
+}
+
+.plantall {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 8px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.plantall input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.plantall-box {
+    width: 18px;
+    height: 18px;
+    border-radius: 5px;
+    border: 2px solid #cbd9bd;
+    background: #fff;
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    line-height: 1;
+    color: transparent;
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.plantall-box::after { content: '✓'; font-weight: 800; }
+
+.plantall input:checked + .plantall-box {
+    background: #5aa84b;
+    border-color: #5aa84b;
+    color: #fff;
+}
+
+.plantall-text {
+    font-size: 12px;
+    font-weight: 700;
+    color: #33502b;
+}
+
+.plantall-hint {
+    margin-top: 4px;
+    min-height: 14px;
+    font-size: 11px;
+    color: #9a6b1f;
+}
+
+.seed-list {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 2px 2px 4px;
+    scrollbar-width: thin;
+}
+
+.seed-card {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    border: 0;
+    border-radius: 12px;
+    background: #f1f5e9;
+    padding: 7px 12px 7px 7px;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.08s ease;
+}
+
+.seed-card:hover { background: #e4eed6; }
+
+.seed-card:active { transform: translateY(1px) scale(0.98); }
+
+.seed-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 9px;
+    background: #fff;
+    display: grid;
+    place-items: center;
+    font-size: 19px;
+}
+
+.seed-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: #2c4a26;
+    white-space: nowrap;
+}
+
+.seed-count {
+    font-size: 11px;
+    font-weight: 700;
+    color: #7c6320;
+    background: #fff6dd;
+    border-radius: 99px;
+    padding: 2px 7px;
+}
+
+.seed-empty {
+    padding: 14px 6px;
+    font-size: 12px;
+    color: #8a8f80;
+}
+
+#plantbar-close {
+    flex: 0 0 auto;
+    border: 0;
+    background: transparent;
+    color: #98a08d;
+    font-size: 15px;
+    padding: 4px 2px 4px 6px;
+    cursor: pointer;
+}
+
 /* ---------------- panel ---------------- */
 #panel {
     position: absolute;
@@ -355,4 +542,8 @@ html, body {
     #toolbar { gap: 5px; padding: 6px; }
     #toolbar button { padding: 8px 9px; font-size: 12px; }
     #panel { width: 70%; }
+    #plantbar { bottom: 14px; width: 94%; gap: 8px; padding: 8px; }
+    .plantbar-left { min-width: 96px; padding-right: 8px; }
+    .plantbar-title { display: none; }
+    .seed-card { padding: 6px 10px 6px 6px; }
 }

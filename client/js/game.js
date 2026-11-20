@@ -20,6 +20,14 @@
         panel: null,
         hover: -1,
         connected: false,
+        plantBar: false,     // 底部"可种植条"是否打开
+        plantAll: false,     // 一键种植勾选状态(默认不勾)
+        planting: false,     // 批量种植请求在飞
+        harvesting: false,   // 一键收获在飞
+        harvestGuard: {},    // 单块收获点击冷却 index -> 时间戳
+        plantGuard: {},      // 单块播种点击冷却 index -> 时间戳
+        waterPending: new Set(),  // 单块浇水请求在飞的地块(防连点重复浇水)
+        fertPending: new Set(),   // 单块施肥请求在飞的地块(防连点重复施肥)
     };
 
     const ERROR_TEXT = {
@@ -39,11 +47,14 @@
         112: '种子不足',
         113: '没有可收获的东西',
         114: '作物不在生长中',
+        115: '没有空地可以种',
     };
 
     let canvas, ctx;
     let lastTs = 0;
     let lastHudAt = 0;
+    let uiBound = false;      // DOM 事件只绑一次(重新登录会再次调用 init)
+    let renderStarted = false;
 
     function $(id) { return document.getElementById(id); }
     function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
@@ -103,18 +114,32 @@
         }
 
         refreshHud();
+        updateHarvestBtn();
+        if (state.plantBar) { renderPlantBar(); updatePlantAllHint(); }
+        if (state.panel) renderPanel();
+    }
+
+    function applyPlots(list) {
+        (list || []).forEach(p => {
+            if (!p) return;
+            state.plots[Number(p.index)] = normalizePlot(p);
+        });
+        updateHarvestBtn();
+        updatePlantAllHint();
+        renderPlantBar();
         if (state.panel) renderPanel();
     }
 
     function applyPlot(plot) {
         if (!plot) return;
-        state.plots[Number(plot.index)] = normalizePlot(plot);
-        if (state.panel) renderPanel();
+        applyPlots([plot]);
     }
 
     function applyItems(list) {
         (list || []).forEach(it => { state.items[Number(it.id)] = Number(it.count); });
         refreshHud();
+        updatePlantAllHint();
+        renderPlantBar();
         if (state.panel) renderPanel();
     }
 
@@ -205,39 +230,137 @@
 
     function selectedPlot() { return state.plots[state.selected]; }
 
+    // ---------------- 地块集合 ----------------
+
+    function isRipe(i) { return plotState(state.plots[i]) === 3; }
+    function isEmptyPlot(i) { return plotState(state.plots[i]) === 1; }
+
+    function ripeList() {
+        const list = [];
+        for (let i = 1; i <= C.CONST.plot_count; i++) if (isRipe(i)) list.push(i);
+        return list;
+    }
+
+    function emptyList() {
+        const list = [];
+        for (let i = 1; i <= C.CONST.plot_count; i++) if (isEmptyPlot(i)) list.push(i);
+        return list;
+    }
+
+    // 点击地块分流: 可收获 -> 直接收获; 空地 -> 弹底部可种植条; 其余只选中
+    function clickPlot(i) {
+        const st = plotState(state.plots[i]);
+        state.selected = i;
+        if (state.panel) closePanel();
+
+        if (st === 3) {
+            closePlantBar();
+            harvestOne(i);
+            return;
+        }
+        if (st === 1) {
+            openPlantBar();
+            return;
+        }
+        closePlantBar();
+        if (st === 0) toast('这块地还没解锁', 'err');
+    }
+
+    // 播种按钮: 打开底部可种植条(没有空地则提示)
     function actPlant() {
-        const p = selectedPlot();
-        if (!p) return toast('先选一块地', 'err');
-        const st = plotState(p);
-        if (st === 0) return toast('这块地还没解锁', 'err');
-        if (st !== 1) return toast('这块地已经种着' + cropName(p.crop_id), 'err');
-        openSeeds();
+        const empties = emptyList();
+        if (!empties.length) return toast('没有空地了', 'err');
+        if (!isEmptyPlot(state.selected)) state.selected = empties[0];
+        closePanel();
+        openPlantBar();
     }
 
     function actWater() {
+        const idx = state.selected;
         const p = selectedPlot();
         const st = plotState(p);
         if (st !== 2) return toast(st === 3 ? '已经成熟了，直接收获吧' : '这块地没有作物', 'err');
-        action('C2SWater', { index: state.selected }, '浇水成功');
+        if (p && p.watered) return toast('已经浇过水了', 'err');
+        // 同一块地请求未返回前不再发, 避免连点发出第二条被服务端回"已经浇过水了"
+        if (state.waterPending.has(idx)) return;
+        state.waterPending.add(idx);
+        action('C2SWater', { index: idx }, '浇水成功').then(() => state.waterPending.delete(idx));
     }
 
     function actFert() {
+        const idx = state.selected;
         const p = selectedPlot();
         const st = plotState(p);
         if (st !== 2) return toast(st === 3 ? '已经成熟了' : '这块地没有作物', 'err');
-        action('C2SFertilize', { index: state.selected }, '施肥成功');
+        if (p && p.fertilized) return toast('已经施过肥了', 'err');
+        if (state.fertPending.has(idx)) return;
+        state.fertPending.add(idx);
+        action('C2SFertilize', { index: idx }, '施肥成功').then(() => state.fertPending.delete(idx));
     }
 
-    function actHarvest() {
-        const p = selectedPlot();
-        const st = plotState(p);
-        if (st !== 3) return toast('还没成熟', 'err');
-        action('C2SHarvest', { index: state.selected });
+    // 单块收获: 点成熟地块直接触发, 500ms 内同一块只认一次, 防连点重复收获
+    function harvestOne(i) {
+        const last = state.harvestGuard[i] || 0;
+        if (Date.now() - last < 500) return;
+        state.harvestGuard[i] = Date.now();
+        action('C2SHarvest', { index: i });
     }
 
-    async function plantCrop(cropId) {
-        closePanel();
-        await action('C2SPlant', { index: state.selected, crop_id: cropId }, '播种成功');
+    // 一键收获: 一次请求收完所有成熟地块, 结果由 S2CHarvestAll 汇总提示
+    function actHarvestAll() {
+        if (state.harvesting) return;
+        if (!ripeList().length) return toast('没有可收获的作物', 'err');
+        state.harvesting = true;
+        updateHarvestBtn();
+        action('C2SHarvestAll', {}, null).then(() => {
+            state.harvesting = false;
+            updateHarvestBtn();
+        });
+    }
+
+    // 点种子卡片: 勾选"一键种植"时种满所有空地, 否则只种当前选中地
+    function plantWith(cropId) {
+        if (state.planting) return toast('正在种植，请稍候', 'err');
+        const crop = C.CROPS[cropId];
+        if (!crop) return;
+        if (state.plantAll) return plantAll(cropId);
+
+        let idx = state.selected;
+        if (!isEmptyPlot(idx)) idx = emptyList()[0] || 0;
+        if (!idx) return toast('没有空地了', 'err');
+        if (!(state.items[crop.seed_item] > 0)) return toast('没有' + crop.name + '种子', 'err');
+
+        // 同一块地 400ms 内只发一次, 避免连点造成"已经种了东西"报错
+        const last = state.plantGuard[idx] || 0;
+        if (Date.now() - last < 400) return;
+        state.plantGuard[idx] = Date.now();
+
+        state.selected = idx;
+        action('C2SPlant', { index: idx, crop_id: cropId }, `种下 ${crop.name}`).then((r) => {
+            if (!r) return;
+            // 种完自动移到下一块空地, 连续点同一张卡片就能一垄一垄种
+            const next = emptyList()[0];
+            if (next) state.selected = next;
+            else closePlantBar();
+        });
+    }
+
+    function plantAll(cropId) {
+        const crop = C.CROPS[cropId];
+        if (!crop) return;
+        const empties = emptyList();
+        if (!empties.length) return toast('没有空地了', 'err');
+        const stock = state.items[crop.seed_item] || 0;
+        if (stock <= 0) return toast('没有' + crop.name + '种子', 'err');
+
+        const will = Math.min(empties.length, stock);
+        state.planting = true;
+        action('C2SPlantAll', { crop_id: cropId, indices: empties }, null).then((r) => {
+            state.planting = false;
+            if (!r) return;
+            if (will < empties.length) toast(`种子不足，只种下 ${will} 块`, 'err');
+            if (!emptyList().length) closePlantBar();
+        });
     }
 
     async function buy(itemId, count) {
@@ -252,16 +375,81 @@
 
     function openPanel(kind) {
         state.panel = kind;
+        closePlantBar();
         $('panel').classList.remove('hidden');
-        $('panel-title').textContent = kind === 'bag' ? '🎒 背包' : kind === 'shop' ? '🏪 商店' : '🌱 选择种子';
+        $('panel-title').textContent = kind === 'bag' ? '🎒 背包' : '🏪 商店';
         renderPanel();
     }
-
-    function openSeeds() { openPanel('seeds'); }
 
     function closePanel() {
         state.panel = null;
         $('panel').classList.add('hidden');
+    }
+
+    // ---------------- 底部可种植条 ----------------
+
+    // 背包里还有库存的种子, 按道具 id 升序
+    function seedEntries() {
+        return Object.keys(state.items)
+            .map(Number)
+            .sort((a, b) => a - b)
+            .map(id => itemCfg(id))
+            .filter(it => it && it.kind === 'seed' && (state.items[it.id] || 0) > 0)
+            .map(it => ({ item: it, crop: C.CROPS[it.crop_id], count: state.items[it.id] }));
+    }
+
+    function openPlantBar() {
+        state.plantBar = true;
+        $('toolbar').classList.add('hidden');   // 让位给种植条, 避免遮住最下面一行地块
+        $('plantbar').classList.remove('hidden');
+        renderPlantBar();
+        updatePlantAllHint();
+    }
+
+    function closePlantBar() {
+        if (!state.plantBar) return;
+        state.plantBar = false;
+        $('plantbar').classList.add('hidden');
+        $('toolbar').classList.remove('hidden');
+    }
+
+    function renderPlantBar() {
+        if (!state.plantBar) return;
+        const box = $('seed-list');
+        if (!box) return;
+
+        const seeds = seedEntries();
+        if (!seeds.length) {
+            box.innerHTML = '<div class="seed-empty">没有种子了，去商店买一些吧</div>';
+            return;
+        }
+        box.innerHTML = seeds.map(s => `
+            <button class="seed-card" data-crop="${s.crop.id}">
+                <span class="seed-icon">${s.item.icon}</span>
+                <span class="seed-name">${s.crop.name}</span>
+                <span class="seed-count">×${s.count}</span>
+            </button>`).join('');
+    }
+
+    // 勾选一键种植时, 提示本次会影响几块空地
+    function updatePlantAllHint() {
+        const el = $('plantall-hint');
+        if (!el) return;
+        if (!state.plantAll) { el.textContent = ''; return; }
+        const empties = emptyList().length;
+        el.textContent = empties ? `将种满 ${empties} 块空地` : '没有空地';
+    }
+
+    // 收获按钮角标: 当前可收获地块数量
+    function updateHarvestBtn() {
+        const btn = $('btn-harvest');
+        const badge = $('harvest-badge');
+        if (!btn || !badge) return;
+        const n = ripeList().length;
+        badge.textContent = n;
+        badge.classList.toggle('hidden', n === 0);
+        btn.classList.toggle('harvest-ready', n > 0 && !state.harvesting);
+        btn.disabled = state.harvesting;
     }
 
     function row(icon, name, sub, buttons) {
@@ -277,22 +465,7 @@
         const body = $('panel-body');
         const html = [];
 
-        if (state.panel === 'seeds') {
-            const seeds = Object.keys(state.items)
-                .map(Number)
-                .filter(id => { const c = itemCfg(id); return c && c.kind === 'seed' && state.items[id] > 0; })
-                .sort((a, b) => a - b);
-            if (!seeds.length) {
-                html.push('<div class="empty-tip">没有种子了，去商店买一些吧</div>');
-            } else {
-                seeds.forEach(id => {
-                    const it = itemCfg(id);
-                    const crop = C.CROPS[it.crop_id];
-                    html.push(row(it.icon, it.name, `库存 ${state.items[id]} · 成熟约 ${crop.grow_seconds}s · +${crop.exp} 经验`,
-                        `<button data-act="plant" data-crop="${it.crop_id}">种植</button>`));
-                });
-            }
-        } else if (state.panel === 'bag') {
+        if (state.panel === 'bag') {
             const ids = Object.keys(state.items).map(Number).filter(id => state.items[id] > 0).sort((a, b) => a - b);
             if (!ids.length) {
                 html.push('<div class="empty-tip">背包空空如也</div>');
@@ -343,6 +516,7 @@
         $('hud-level').textContent = `Lv.${p.level} · ${p.exp}/${nextExp(p.level)}`;
         $('hud-expbar').style.width = clamp(100 * p.exp / nextExp(p.level), 0, 100) + '%';
         $('hud-coin').textContent = p.coin;
+        updateHarvestBtn();
     }
 
     function setConnected(ok) {
@@ -727,7 +901,7 @@
             if (btn.dataset.act === 'plant') actPlant();
             else if (btn.dataset.act === 'water') actWater();
             else if (btn.dataset.act === 'fert') actFert();
-            else if (btn.dataset.act === 'harvest') actHarvest();
+            else if (btn.dataset.act === 'harvest') actHarvestAll();
         });
 
         $('btn-bag').addEventListener('click', () => {
@@ -742,9 +916,27 @@
             const btn = e.target.closest('button[data-act]');
             if (!btn) return;
             const act = btn.dataset.act;
-            if (act === 'plant') plantCrop(Number(btn.dataset.crop));
+            if (act === 'plant') { closePanel(); plantWith(Number(btn.dataset.crop)); }
             else if (act === 'buy') buy(Number(btn.dataset.id), Number(btn.dataset.count || 1));
             else if (act === 'sell') sell(Number(btn.dataset.id), Number(btn.dataset.count || 1));
+        });
+
+        // 底部可种植条: 点种子卡片 / 勾选一键种植 / 关闭
+        $('seed-list').addEventListener('click', (e) => {
+            const card = e.target.closest('.seed-card');
+            if (!card) return;
+            plantWith(Number(card.dataset.crop));
+        });
+        $('plantall-check').addEventListener('change', (e) => {
+            state.plantAll = e.target.checked;
+            updatePlantAllHint();
+        });
+        $('plantbar-close').addEventListener('click', closePlantBar);
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            closePlantBar();
+            if (state.panel) closePanel();
         });
 
         canvas.addEventListener('pointermove', (e) => {
@@ -759,8 +951,7 @@
             const pt = canvasPoint(e);
             const idx = hitPlot(pt.x, pt.y);
             if (!idx) return;
-            state.selected = idx;
-            if (state.panel) closePanel();
+            clickPlot(idx);
         });
 
         window.addEventListener('resize', resizeCanvas);
@@ -781,7 +972,27 @@
         canvas = $('farm');
         ctx = canvas.getContext('2d');
 
-        bindUI();
+        // 重登/重连会在同一个页面上再次调用 init. bindUI 只能执行一次:
+        // 若重复绑定, 点一次"背包/商店"会依次触发多个 toggle, 面板开了又立刻被关上,
+        // 表现就是按钮"按了没反应". 处理函数读的是模块级 state.net, 无需重新绑定.
+        if (!uiBound) { bindUI(); uiBound = true; }
+
+        // 清理上一次会话残留的界面/临时状态
+        state.panel = null;
+        state.plantBar = false;
+        state.busy = false;
+        state.planting = false;
+        state.harvesting = false;
+        state.harvestGuard = {};
+        state.plantGuard = {};
+        state.waterPending.clear();
+        state.fertPending.clear();
+        state.player = null;
+        state.plots = [];
+        state.items = {};
+        $('panel').classList.add('hidden');
+        $('plantbar').classList.add('hidden');
+        $('toolbar').classList.add('hidden');
         resizeCanvas();
 
         net.on('S2CPlotUpdate', (m) => applyPlot(m.plot));
@@ -794,13 +1005,33 @@
         });
         net.on('S2CItemUpdate', (m) => applyItems(m.items));
         net.on('S2CPlayerUpdate', (m) => applyPlayer(m));
+        // 一键收获: plots 一次性带回本批地块, 结果汇总成一条提示
+        net.on('S2CHarvestAll', (m) => {
+            applyPlots(m.plots);
+            const gained = (m.items || []).map(it => {
+                const cfg = itemCfg(Number(it.id));
+                return `${cfg ? cfg.name : it.id} ×${Number(it.count)}`;
+            }).join('、');
+            toast(`收获 ${gained} · +${Number(m.exp_total)} 经验`, 'good');
+        });
+        // 一键种植: 服务端只回真正种下的地块, planted 可能小于请求块数
+        net.on('S2CPlantAll', (m) => {
+            applyPlots(m.plots);
+            const first = (m.plots || [])[0];
+            const name = first ? cropName(Number(first.crop_id)) : '作物';
+            toast(`种下 ${Number(m.planted)} 块${name}`, 'good');
+        });
         net.onClose(() => {
             setConnected(false);
+            closePlantBar();
             toast('与服务器断开连接', 'err');
         });
 
         setConnected(true);
-        requestAnimationFrame((ts) => { lastTs = ts; render(); });
+        if (!renderStarted) {
+            renderStarted = true;
+            requestAnimationFrame((ts) => { lastTs = ts; render(); });
+        }
     }
 
     function showGame() {

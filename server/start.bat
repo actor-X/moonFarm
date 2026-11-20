@@ -15,7 +15,7 @@ rem timeout.exe 等程序(参数不兼容), 这里显式写全路径避免踩坑.
 set "SYS=%SystemRoot%\System32"
 set "PS=%SYS%\WindowsPowerShell\v1.0\powershell.exe"
 set "ROOT=%~dp0.."
-set "MOON=..\..\target\debug\moon.exe"
+set "MOON=..\bin\moon.exe"
 set "WEBPORT=8080"
 
 echo ============================================================
@@ -34,7 +34,7 @@ if errorlevel 1 (
 )
 if not exist "%MOON%" (
     echo [错误] 找不到 %MOON%
-    echo        请先在仓库根目录执行: premake5 build
+    echo        put moon.exe in myFarm\bin
     pause
     exit /b 1
 )
@@ -44,7 +44,7 @@ echo [1/3] 检查并关闭已运行的服务...
 set "FOUND=0"
 
 rem 1.1 游戏服务: 只杀本仓库路径下的 moon.exe, 避免误杀别的项目
-for /f "usebackq tokens=*" %%P in (`%PS% -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'moon.exe' -and $_.ExecutablePath -like '*moon-master*' } | Select-Object -ExpandProperty ProcessId"`) do (
+for /f "usebackq tokens=*" %%P in (`%PS% -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'moon.exe' -and ($_.ExecutablePath -like '*myFarm*' -or $_.ExecutablePath -like '*moon-master*') } | Select-Object -ExpandProperty ProcessId"`) do (
     echo       关闭 moon.exe ^(PID %%P^)
     taskkill /f /pid %%P >nul 2>&1
     set "FOUND=1"

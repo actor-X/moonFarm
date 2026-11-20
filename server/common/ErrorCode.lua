@@ -20,6 +20,7 @@ local ErrorCode = {
     SeedNotEnough = 112,
     NothingToHarvest = 113,
     NotGrowing = 114,
+    NoEmptyPlot = 115,
 }
 
 return ErrorCode

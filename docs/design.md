@@ -37,7 +37,7 @@
 
 | 服务 | 文件 | 职责 |
 | --- | --- | --- |
-| `db` | `../../service/redisd.lua` | Redis 连接池，异步读写 |
+| `db` | `service/redisd.lua` | Redis 连接池，异步读写 |
 | `gate` | `game/service_gate.lua` + `gate/Gate.lua` | 监听 TCP/WS；未登录连接的首包转给 auth；已登录连接的消息原样转发给对应 user 服务；S2C 按 uid 发回 socket |
 | `auth` | `game/service_auth.lua` + `auth/Auth.lua` | openid → uid；为新玩家 `moon.new_service` 创建 user 服务；把连接绑定到 uid；断线通知 |
 | `user` | `game/service_user.lua` + `user/*.lua` | 玩家私有状态：农场、背包、商店；定时/下线落盘 |
@@ -93,6 +93,20 @@ client                 gate                auth                 user(新建)
 | 15 | S2CItemUpdate | 背包条目更新 |
 | 16 | S2CPlayerUpdate | 等级/经验/金币更新 |
 | 18 | S2CErrorCode | 业务错误码 |
+| 19/20 | C2SHarvestAll / S2CHarvestAll | 一键收获：一次收完所有成熟地，结果合并下发 |
+| 21/22 | C2SPlantAll / S2CPlantAll | 一键种植：若干空地一次种同一作物 |
+
+批量操作（19~22）一次请求完成全部动作：地块由结果消息一次性带回，
+背包、经验在服务端合并后各推一条，避免 N 块地刷 N 倍推送。
+单块 `C2SPlant/C2SHarvest` 保持不变，旧客户端不受影响。
+
+### 3.1 客户端交互
+
+- 点地块按状态分流：可收获 → 直接 `C2SHarvest`；空地 → 弹底部“可种植条”；生长中/锁定 → 只选中
+- 底部可种植条列出背包里的种子与库存数量，勾选“一键种植”（默认不勾）后点种子卡片即
+  把该作物种满所有空地，实际块数 = min(空地数, 种子数)；不勾则只种当前选中地并自动跳到下一块空地
+- 工具栏的“一键收获”按钮带可收获数量角标，点击发一次 `C2SHarvestAll`
+- 种植条与工具栏共用底部位置：条打开时工具栏收起，避免遮住第三行地块
 
 ## 4. 数据模型
 

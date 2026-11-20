@@ -13,34 +13,45 @@
 
 ## 环境要求
 
-- [moon](https://github.com/sniper00/moon) 框架（需自行构建，见下）
+- moon 运行时（`bin/moon.exe`；Linux/macOS 为 `bin/moon`，需自行构建，见下）
+- moon 的 Lua 库已随仓库放在 `server/lualib` 与 `server/service`，无需额外下载
 - Redis 4.0+（本机 127.0.0.1:6379 即可）
 - Node.js 14+（静态服务器与自动化测试用）
 - 浏览器：任意支持 WebSocket 的现代浏览器
 
 ### 目录布局
 
-服务端脚本通过 `../../lualib` 和 `../../service/redisd.lua` 引用 moon 框架，
-`start.bat` 使用 `../../target/debug/moon.exe`。因此本仓库需要放在 moon 根目录下：
+本仓库是自包含的：moon 的 Lua 库已经拷贝到 `server/lualib`、`server/service`，
+moon 可执行文件放在 `bin/`。部署时整个 `myFarm/` 目录即可独立运行，不再依赖 moon 源码目录：
 
 ```
-moon/                     # moon 框架根目录
-├── target/debug/moon.exe
-├── lualib/
-├── service/
-└── myFarm/               # 本仓库
-    ├── server/
-    ├── client/
-    └── tools/
+myFarm/                    # 本仓库
+├── bin/
+│   └── moon.exe           # moon 运行时(Windows; Linux/macOS 为 bin/moon)
+├── server/
+│   ├── main.lua
+│   ├── lualib/            # moon 框架 Lua 库(从 moon 仓库拷贝)
+│   ├── service/           # moon 内置服务(redisd.lua 等)
+│   ├── common/ game/ protocol/
+│   └── serverconf.lua
+├── client/
+└── tools/
 ```
 
-首次构建 moon（在 moon 根目录执行，Windows 需 VS2022）：
+`lualib/` 与 `service/` 是 moon 框架的副本，升级 moon 时需要手动重新拷贝。
+
+moon 本体需自行构建，构建后把可执行文件放进 `myFarm/bin/`：
 
 ```shell
-premake5 build            # 或 premake5 build --release
-```
+git clone https://github.com/sniper00/moon
+cd moon
+premake5 build --release          # Windows 需 VS2022
 
-构建完成后确认 `target/debug/moon.exe`（Linux/macOS 为 `target/debug/moon`）存在。
+# Windows
+cp target/release/moon.exe <path>/myFarm/bin/moon.exe
+# Linux / macOS
+cp target/release/moon <path>/myFarm/bin/moon
+```
 
 ## 运行
 
@@ -67,7 +78,7 @@ FARM_REDIS_HOST=127.0.0.1 FARM_REDIS_PORT=6379 FARM_REDIS_AUTH= ./server/start.b
 ```shell
 # 或在 Git Bash 中
 cd myFarm/server
-../../target/debug/moon.exe main.lua
+../bin/moon.exe main.lua          # Linux/macOS: ../bin/moon main.lua
 ```
 
 启动后：
@@ -90,7 +101,7 @@ node tools/serve.js 8080
 
 ```shell
 cd myFarm
-node tools/test_e2e.js        # 27 项: 登录/播种/浇水/施肥/成熟/收获/买卖/错误码
+node tools/test_e2e.js        # 端到端: 登录/播种/浇水/施肥/成熟/收获/买卖/一键种植/一键收获/错误码
 node tools/test_persist.js    # 断线重连后存档恢复
 ```
 
@@ -106,6 +117,8 @@ node tools/screenshot.js "http://127.0.0.1:8080/?auto=1&openid=demo&name=小农�
 - 4 种作物：胡萝卜(20s) / 小麦(45s) / 番茄(90s) / 草莓(150s)
 - 播种 → 浇水(-10% 时间) → 施肥(-30% 时间，消耗化肥) → 成熟收获
 - 收获获得果实 + 经验；商店买种子/化肥，卖果实换金币
+- 点成熟地块直接收获；点空地弹底部种植条，可勾选“一键种植”批量种满空地
+- 工具栏支持一键收获所有成熟地块
 - 升级曲线：`100 + (等级-1)*50` 经验
 - 数据每 5 秒自动存 Redis，下线/关服也会落盘
 

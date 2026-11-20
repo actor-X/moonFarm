@@ -30,10 +30,24 @@
             <button data-act="plant" class="primary">🌱 播种</button>
             <button data-act="water">💧 浇水</button>
             <button data-act="fert">🧪 施肥</button>
-            <button data-act="harvest">🧺 收获</button>
+            <button data-act="harvest" id="btn-harvest">🧺 一键收获<span id="harvest-badge" class="badge hidden">0</span></button>
             <span class="sep"></span>
             <button id="btn-bag">🎒 背包</button>
             <button id="btn-shop">🏪 商店</button>
+        </div>
+
+        <div id="plantbar" class="hidden">
+            <div class="plantbar-left">
+                <div class="plantbar-title">🌱 空地上可以种</div>
+                <label class="plantall" for="plantall-check">
+                    <input type="checkbox" id="plantall-check">
+                    <span class="plantall-box"></span>
+                    <span class="plantall-text">一键种植</span>
+                </label>
+                <div class="plantall-hint" id="plantall-hint"></div>
+            </div>
+            <div class="seed-list" id="seed-list"></div>
+            <button id="plantbar-close" title="关闭">✕</button>
         </div>
 
         <div id="panel" class="hidden">

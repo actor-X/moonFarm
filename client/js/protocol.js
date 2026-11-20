@@ -24,6 +24,10 @@
         S2CPlayerUpdate: 16,
         S2CPong: 17,
         S2CErrorCode: 18,
+        C2SHarvestAll: 19,
+        S2CHarvestAll: 20,
+        C2SPlantAll: 21,
+        S2CPlantAll: 22,
     };
 
     if (typeof Long !== 'undefined' && protobuf.util && !protobuf.util.Long) {

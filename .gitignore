@@ -2,9 +2,30 @@ server/log/
 server/console.log
 server/serverconf.local.lua
 *.log
+bin/
 node_modules/
 *.exe
 .vscode/
 .idea/
 Thumbs.db
 .DS_Store
+
+# 提取自小游戏缓存的美术素材(体积大, 不入库; 由 tools/extract_assets.js 重新生成)
+client/assets/plant/
+client/assets/animal/
+client/assets/petdog/
+client/assets/mainscene/
+client/assets/mcRes/
+client/assets/commonRes/
+client/assets/extraRes/
+client/assets/delayRes/
+client/assets/audio/
+client/assets/_meta/
+client/assets/manifest.json
+docs/asset-scan.txt
+docs/inspect*.txt
+docs/png-check.txt
+docs/mp3.txt
+docs/groups.txt
+# 从原游戏包导出的资源清单, 不入库
+docs/client-resources/

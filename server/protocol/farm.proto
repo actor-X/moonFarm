@@ -120,6 +120,36 @@ message C2SHarvest {
   int32 index = 1;
 }
 
+// 一键收获: 一次收完所有已成熟地块. 无字段, 目标由服务端按 ready_at 自行计算.
+message C2SHarvestAll {}
+
+// 一键收获结果. 客户端据此更新地块并汇总提示, 背包/经验另有推送.
+message S2CHarvestAll {
+  // 收获后已重置为空地的地块, 按 index 升序
+  repeated PlotData plots = 1;
+  // 本次收获得到的果实, 已按果实 id 合并 (数量是本次所得, 不是库存)
+  repeated ItemData items = 2;
+  // 本次收获获得的总经验 (多块累加)
+  int32 exp_total = 3;
+}
+
+// 一键种植: 把若干块空地一次性种上同一作物.
+message C2SPlantAll {
+  // 作物 id, 必须是 GameCfg.crops 的 key
+  int32 crop_id = 1;
+  // 目标地块序号列表; 服务端只种其中真实处于空地 (state=1) 的地块,
+  // 去重后按顺序取前 N 块, N = min(合法空地数, 持有种子数)
+  repeated int32 indices = 2;
+}
+
+// 一键种植结果.
+message S2CPlantAll {
+  // 完成播种的地块, 按 index 升序
+  repeated PlotData plots = 1;
+  // 实际种下的块数; 小于请求空地数说明种子不足
+  int32 planted = 2;
+}
+
 // 商店购买.
 message C2SBuy {
   // 道具 id; 必须存在且 buy_price > 0
