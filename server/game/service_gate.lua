@@ -21,6 +21,8 @@ local context = {
     uid_map = {},
     fd_map = {},
     auth_watch = {},
+    --- 登录包序号: 用作 auth_watch 的可靠 sign(消息对象地址会被复用)
+    login_seq = 0,
 }
 
 setup(context)
@@ -29,14 +31,17 @@ local function on_message(fd, msg)
     local c = context.fd_map[fd]
     if not c then
         --- 未登录: 第一个包必须是登录消息
-        context.auth_watch[fd] = tostring(msg)
+        context.login_seq = context.login_seq + 1
+        local sign = context.login_seq
+        context.auth_watch[fd] = sign
+
         local ok, name, req = pcall(protocol.decode, moon.decode(msg, "B"))
         if not ok then
             moon.error("Decode auth message failed:", name)
             socket.close(fd)
             return
         end
-        req.sign = context.auth_watch[fd]
+        req.sign = sign
         req.fd = fd
         req.addr = socket.getaddress(fd)
         req.pull = false
@@ -55,8 +60,12 @@ local function on_close(fd, msg)
         return
     end
     context.fd_map[fd] = nil
-    context.uid_map[c.uid] = nil
-    context.AuthEvent.Auth.Disconnect(c.uid)
+    --- 只有当前绑定仍是这条连接时才清 uid_map, 避免误删顶号后的新绑定
+    if context.uid_map[c.uid] == c then
+        context.uid_map[c.uid] = nil
+    end
+    --- 带 fd: auth 只处理当前会话的断线, 过期的 close 事件会被丢弃
+    context.AuthEvent.Auth.Disconnect(c.uid, fd)
     print("GATE: close", fd, c.uid, data)
 end
 

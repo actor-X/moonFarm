@@ -64,9 +64,14 @@ client                 gate                auth                 user(新建)
 
 要点：
 
-- gate 只在**未绑定**的连接上解析首包（必须是 `C2SLogin`）；
+- gate 只在**未绑定**的连接上解析首包（必须是 `C2SLogin`）；每个登录包带一个 gate 内自增的 `sign`；
+- auth 对同一 uid 的登录串行执行；顶号时先在 auth 侧让旧会话失效，再由 gate 的 `BindUser` RPC
+  校验 `sign`、踢掉旧 fd、绑定新 fd；
+- 断线通知 `Auth.Disconnect(uid, fd)` 带 fd，只对当前会话生效，迟到的旧连接 close 事件会被丢弃；
 - 绑定之后 gate 不再解包业务消息，直接 `moon.redirect` 给 user 服务；
 - 服务器主动回包统一走 `S2C` 协议：`[uid 序列化][cmd:2 LE][protobuf]`，gate 解出 uid 后写到对应 fd。
+
+并发登录、顶号、断线重连的完整设计与边界见 [登录与顶号方案.md](登录与顶号方案.md)。
 
 ## 3. 协议
 
@@ -215,8 +220,9 @@ myFarm/
 ├── tools/
 │   ├── serve.js               静态服务器
 │   ├── gen_proto_inline.js    重新内嵌 proto
-│   ├── test_e2e.js            27 项端到端测试
+│   ├── test_e2e.js            端到端玩法测试(51 项)
 │   ├── test_persist.js        断线重连存档测试
+│   ├── test_login_concurrency.js 登录/顶号并发测试
 │   └── screenshot.js          CDP 截图（文档用）
 └── docs/
 ```

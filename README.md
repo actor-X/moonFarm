@@ -101,8 +101,9 @@ node tools/serve.js 8080
 
 ```shell
 cd myFarm
-node tools/test_e2e.js        # 端到端: 登录/播种/浇水/施肥/成熟/收获/买卖/一键种植/一键收获/错误码
-node tools/test_persist.js    # 断线重连后存档恢复
+node tools/test_e2e.js                 # 端到端: 登录/播种/浇水/施肥/成熟/收获/买卖/一键种植/一键收获/错误码
+node tools/test_persist.js             # 断线重连后存档恢复
+node tools/test_login_concurrency.js   # 登录/顶号并发: 双开、重复登录、登录中断开
 ```
 
 文档截图（需要 Chrome）：
